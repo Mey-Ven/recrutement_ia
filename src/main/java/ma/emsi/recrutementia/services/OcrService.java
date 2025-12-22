@@ -6,27 +6,30 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import ma.emsi.recrutementia.utils.OcrTextCleaner;
 
 @Service
 public class OcrService {
 
     public String extractText(MultipartFile file) throws Exception {
 
-        // Sauvegarde temporaire du fichier
-        Path temp = Files.createTempFile("cv_", file.getOriginalFilename());
+        Path temp = Files.createTempFile("cv_", "_" + safeName(file.getOriginalFilename()));
         Files.write(temp, file.getBytes());
 
-        // Configuration de Tesseract
         Tesseract tesseract = new Tesseract();
-        tesseract.setDatapath("C:/Program Files/Tesseract-OCR/tessdata"); // on va l’installer juste après
+
+        // IMPORTANT: datapath = dossier d'installation (qui contient /tessdata)
+        tesseract.setDatapath("C:/Program Files/Tesseract-OCR/tessdata");
         tesseract.setLanguage("eng+fra");
 
-        // Extraction du texte
         String result = tesseract.doOCR(temp.toFile());
-
-        // Nettoyage
-        Files.delete(temp);
-
+        result = OcrTextCleaner.clean(result);
         return result;
+    }
+
+
+    private String safeName(String name) {
+        if (name == null) return "file";
+        return name.replaceAll("[^a-zA-Z0-9._-]", "_");
     }
 }
