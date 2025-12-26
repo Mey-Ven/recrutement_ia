@@ -3,7 +3,6 @@ package ma.emsi.recrutementia.web;
 import ma.emsi.recrutementia.dto.SkillsResponse;
 import ma.emsi.recrutementia.services.AiService;
 import ma.emsi.recrutementia.services.OcrService;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -12,30 +11,38 @@ import org.springframework.web.multipart.MultipartFile;
 @RequestMapping("/api/cv")
 public class CvController {
 
-    @Autowired
-    private OcrService ocrService;
+    private final OcrService ocrService;
+    private final AiService aiService;
 
-    @Autowired
-    private AiService aiService;
+    public CvController(OcrService ocrService, AiService aiService) {
+        this.ocrService = ocrService;
+        this.aiService = aiService;
+    }
 
-    // 1️⃣ OCR seulement
+    // OCR only (cleaned text)
     @PostMapping("/upload")
-    public ResponseEntity<String> uploadCv(@RequestParam("file") MultipartFile file) {
+    public ResponseEntity<?> uploadCv(@RequestParam("file") MultipartFile file) {
         try {
+            System.out.println("📄 Fichier reçu: " + file.getOriginalFilename());
+
             String text = ocrService.extractText(file);
+
+            System.out.println("🧠 OCR OK");
+
             return ResponseEntity.ok(text);
+
         } catch (Exception e) {
+            e.printStackTrace();
             return ResponseEntity.badRequest().body("Erreur OCR: " + e.getMessage());
         }
     }
 
-    // 2️⃣ OCR + IA → skills
+    // OCR -> skills
     @PostMapping("/upload-skills")
-    public ResponseEntity<SkillsResponse> uploadCvAndExtractSkills(
-            @RequestParam("file") MultipartFile file) {
+    public ResponseEntity<SkillsResponse> uploadCvAndExtractSkills(@RequestParam("file") MultipartFile file) {
         try {
-            String cleanedText = ocrService.extractText(file);
-            SkillsResponse skills = aiService.extractSkills(cleanedText);
+            String cleaned = ocrService.extractText(file);
+            SkillsResponse skills = aiService.extractSkills(cleaned);
             return ResponseEntity.ok(skills);
         } catch (Exception e) {
             return ResponseEntity.badRequest().build();

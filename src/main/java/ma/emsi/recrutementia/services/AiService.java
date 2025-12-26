@@ -1,22 +1,33 @@
 package ma.emsi.recrutementia.services;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import ma.emsi.recrutementia.dto.MatchResponse;
 import ma.emsi.recrutementia.dto.SkillsResponse;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 
-import java.util.Map;
+import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
 public class AiService {
 
-    private static final String OLLAMA_GENERATE_URL = "http://localhost:11434/api/generate";
-
     private final RestClient restClient = RestClient.create();
     private final ObjectMapper mapper = new ObjectMapper();
 
-    // 1) Corriger texte OCR (retourne du texte)
+    private final String ollamaUrl;
+    private final String model;
+
+    public AiService(
+            @Value("${app.ollama.url}") String ollamaUrl,
+            @Value("${app.ollama.model:mistral}") String model
+    ) {
+        this.ollamaUrl = ollamaUrl;
+        this.model = model;
+    }
+
     public String corrigerTexte(String texteOcr) {
         String prompt = """
 Tu es un correcteur OCR.
@@ -30,27 +41,25 @@ Texte OCR:
 """.formatted(texteOcr);
 
         Map<String, Object> body = Map.of(
-                "model", "mistral",
+                "model", model,
                 "prompt", prompt,
                 "stream", false
         );
 
         @SuppressWarnings("unchecked")
         Map<String, Object> resp = restClient.post()
-                .uri(OLLAMA_GENERATE_URL)
+                .uri(ollamaUrl)
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(body)
                 .retrieve()
                 .body(Map.class);
 
-        return (String) resp.get("response"); // champ "response" dans la réponse Ollama 
+        return (String) resp.getOrDefault("response", "");
     }
 
-    // 2) Extraire skills (retourne JSON -> SkillsResponse)
-    public SkillsResponse extractSkills(String cleanedCvText) throws Exception {
-
+    public SkillsResponse extractSkills(String text) throws Exception {
         String prompt = """
-Tu es un extracteur de compétences à partir d'un CV.
+Tu es un extracteur de compétences à partir d'un texte.
 Retourne UNIQUEMENT un JSON valide EXACTEMENT au format:
 {"skills":["...","..."]}
 
@@ -59,14 +68,14 @@ Règles:
 - normalise (ex: "Spring boot" -> "Spring Boot", "postgres" -> "PostgreSQL")
 - pas d'explications, pas de markdown, pas de texte hors JSON
 
-Texte CV:
+Texte:
 <<<
 %s
 >>>
-""".formatted(cleanedCvText);
+""".formatted(text);
 
         Map<String, Object> body = Map.of(
-                "model", "mistral",
+                "model", model,
                 "prompt", prompt,
                 "stream", false,
                 "format", "json"
@@ -74,13 +83,45 @@ Texte CV:
 
         @SuppressWarnings("unchecked")
         Map<String, Object> resp = restClient.post()
-                .uri(OLLAMA_GENERATE_URL)
+                .uri(ollamaUrl)
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(body)
                 .retrieve()
                 .body(Map.class);
 
-        String json = (String) resp.get("response"); // JSON généré par le modèle 
-        return mapper.readValue(json, SkillsResponse.class); // parse JSON -> objet 
+        String json = (String) resp.getOrDefault("response", "{\"skills\":[]}");
+        return mapper.readValue(json, SkillsResponse.class);
+    }
+
+    public MatchResponse matchCvOffer(String cvText, String offerText) throws Exception {
+        SkillsResponse cvSkills = extractSkills(cvText);
+        SkillsResponse offerSkills = extractSkills(offerText);
+
+        Set<String> cvSet = (cvSkills.getSkills() == null ? List.<String>of() : cvSkills.getSkills())
+                .stream()
+                .map(s -> s.trim().toLowerCase())
+                .filter(s -> !s.isBlank())
+                .collect(Collectors.toSet());
+
+        List<String> offerList = (offerSkills.getSkills() == null ? List.<String>of() : offerSkills.getSkills())
+                .stream()
+                .map(String::trim)
+                .filter(s -> !s.isBlank())
+                .distinct()
+                .toList();
+
+        List<String> matched = new ArrayList<>();
+        List<String> missing = new ArrayList<>();
+
+        for (String s : offerList) {
+            if (cvSet.contains(s.toLowerCase())) matched.add(s);
+            else missing.add(s);
+        }
+
+        int score = offerList.isEmpty()
+                ? 0
+                : (int) Math.round(matched.size() * 100.0 / offerList.size());
+
+        return new MatchResponse(score, matched, missing);
     }
 }

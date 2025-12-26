@@ -1,32 +1,45 @@
 package ma.emsi.recrutementia.services;
 
+import ma.emsi.recrutementia.utils.OcrTextCleaner;
 import net.sourceforge.tess4j.Tesseract;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import ma.emsi.recrutementia.utils.OcrTextCleaner;
 
 @Service
 public class OcrService {
 
-    public String extractText(MultipartFile file) throws Exception {
+    private final String tesseractPath;
+    private final String languages;
 
+    public OcrService(
+            @Value("${app.tesseract.path}") String tesseractPath,
+            @Value("${app.tesseract.lang:eng+fra}") String languages
+    ) {
+        this.tesseractPath = tesseractPath;
+        this.languages = languages;
+    }
+
+    public String extractText(MultipartFile file) throws Exception {
         Path temp = Files.createTempFile("cv_", "_" + safeName(file.getOriginalFilename()));
         Files.write(temp, file.getBytes());
 
-        Tesseract tesseract = new Tesseract();
+        try {
+            Tesseract tesseract = new Tesseract();
+            // datapath must be the install folder that contains /tessdata
+            tesseract.setDatapath(tesseractPath);
+            tesseract.setLanguage(languages);
 
-        // IMPORTANT: datapath = dossier d'installation (qui contient /tessdata)
-        tesseract.setDatapath("C:/Program Files/Tesseract-OCR/tessdata");
-        tesseract.setLanguage("eng+fra");
+            String raw = tesseract.doOCR(temp.toFile());
+            return OcrTextCleaner.clean(raw);
 
-        String result = tesseract.doOCR(temp.toFile());
-        result = OcrTextCleaner.clean(result);
-        return result;
+        } finally {
+            Files.deleteIfExists(temp);
+        }
     }
-
 
     private String safeName(String name) {
         if (name == null) return "file";

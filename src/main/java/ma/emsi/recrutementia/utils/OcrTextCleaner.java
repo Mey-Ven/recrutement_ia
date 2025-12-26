@@ -1,22 +1,27 @@
 package ma.emsi.recrutementia.utils;
 
+import java.text.Normalizer;
+
 public class OcrTextCleaner {
+
+    private OcrTextCleaner() {}
 
     public static String clean(String raw) {
         if (raw == null) return "";
 
-        String s = raw;
+        String s = Normalizer.normalize(raw, Normalizer.Form.NFC);
 
-        // Supprimer caractères bizarres OCR
-        s = s.replaceAll("[^\\p{L}\\p{N}\\p{P}\\p{Z}\\n]", " ");
+        // remove control chars except \n \t
+        s = s.replaceAll("[\\p{Cntrl}&&[^\n\t]]", " ");
 
-        // Normaliser espaces
-        s = s.replaceAll("[\\t\\r]+", " ");
-        s = s.replaceAll(" +", " ");
+        // fix hyphen line breaks: "dévelop-\npement" -> "développement"
+        s = s.replaceAll("-\\s*\\n\\s*", "");
 
-        // Nettoyer sauts de ligne excessifs
-        s = s.replaceAll("\\n{3,}", "\n\n");
+        // normalize new lines and spaces
+        s = s.replace("\r", "\n");
+        s = s.replaceAll("[\\n\\t]+", " ");
+        s = s.replaceAll("\\s{2,}", " ").trim();
 
-        return s.trim();
+        return s;
     }
 }
