@@ -20,6 +20,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/match")
+@CrossOrigin(origins = "*")
 public class MatchController {
 
     private final MatchingService matchingService;

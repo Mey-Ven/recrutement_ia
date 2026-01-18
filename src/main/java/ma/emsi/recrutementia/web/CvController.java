@@ -9,6 +9,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 @RestController
 @RequestMapping("/api/cv")
+@CrossOrigin(origins = "*")
 public class CvController {
 
     private final OcrService ocrService;

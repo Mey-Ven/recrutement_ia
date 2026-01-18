@@ -26,6 +26,7 @@ import ma.emsi.recrutementia.dto.SkillsResponse;
 
 @RestController
 @RequestMapping("/api/candidats")
+@CrossOrigin(origins = "*")
 public class CandidatRestController {
 
     private final CandidatRepository candidatRepository;
