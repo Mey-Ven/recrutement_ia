@@ -1,6 +1,8 @@
 package ma.emsi.recrutementia.web;
 
+import ma.emsi.recrutementia.dto.CandidateMatchHistory;
 import ma.emsi.recrutementia.dto.CandidateRankingResponse;
+import ma.emsi.recrutementia.dto.CandidateStatistics;
 import ma.emsi.recrutementia.dto.MatchRequest;
 import ma.emsi.recrutementia.dto.MatchResponse;
 import ma.emsi.recrutementia.entities.Candidat;
@@ -61,7 +63,14 @@ public class MatchController {
         }
     }
 
-    // 🎯 NOUVEAU : Classement des candidats pour une offre
+    // ========================================
+    // ENDPOINTS POUR LES OFFRES
+    // ========================================
+    
+    /**
+     * Classement des candidats pour une offre
+     * GET /api/match/by-offer/{offerId}
+     */
     @GetMapping("/by-offer/{offerId}")
     public ResponseEntity<?> rankCandidatesByOffer(@PathVariable Long offerId) {
         try {
@@ -75,7 +84,10 @@ public class MatchController {
         }
     }
 
-    // 🎯 NOUVEAU : Recalculer et classer tous les candidats
+    /**
+     * Recalculer et classer tous les candidats
+     * GET /api/match/by-offer/{offerId}/refresh
+     */
     @GetMapping("/by-offer/{offerId}/refresh")
     public ResponseEntity<?> refreshAndRankCandidates(@PathVariable Long offerId) {
         try {
@@ -89,7 +101,10 @@ public class MatchController {
         }
     }
 
-    // 🎯 NOUVEAU : Statistiques d'une offre
+    /**
+     * Statistiques d'une offre
+     * GET /api/match/by-offer/{offerId}/stats
+     */
     @GetMapping("/by-offer/{offerId}/stats")
     public ResponseEntity<?> getOfferStats(@PathVariable Long offerId) {
         try {
@@ -99,6 +114,61 @@ public class MatchController {
             return ResponseEntity.ok(stats);
             
         } catch (Exception e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
+    // ========================================
+    // 🆕 NOUVEAUX ENDPOINTS POUR LES CANDIDATS
+    // ========================================
+    
+    /**
+     * Historique complet d'un candidat (tous les matchings)
+     * GET /api/match/by-candidat/{candidatId}/history
+     */
+    @GetMapping("/by-candidat/{candidatId}/history")
+    public ResponseEntity<?> getCandidateHistory(@PathVariable Long candidatId) {
+        try {
+            List<CandidateMatchHistory> history = 
+                rankingService.getCandidateMatchHistory(candidatId);
+            
+            return ResponseEntity.ok(history);
+            
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+    
+    /**
+     * Meilleurs matchings d'un candidat (1 par offre, le plus récent)
+     * GET /api/match/by-candidat/{candidatId}/best-matches
+     */
+    @GetMapping("/by-candidat/{candidatId}/best-matches")
+    public ResponseEntity<?> getCandidateBestMatches(@PathVariable Long candidatId) {
+        try {
+            List<CandidateMatchHistory> bestMatches = 
+                rankingService.getCandidateBestMatches(candidatId);
+            
+            return ResponseEntity.ok(bestMatches);
+            
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+    
+    /**
+     * Statistiques d'un candidat
+     * GET /api/match/by-candidat/{candidatId}/stats
+     */
+    @GetMapping("/by-candidat/{candidatId}/stats")
+    public ResponseEntity<?> getCandidateStats(@PathVariable Long candidatId) {
+        try {
+            CandidateStatistics stats = 
+                rankingService.getCandidateStatistics(candidatId);
+            
+            return ResponseEntity.ok(stats);
+            
+        } catch (RuntimeException e) {
             return ResponseEntity.badRequest().body(e.getMessage());
         }
     }

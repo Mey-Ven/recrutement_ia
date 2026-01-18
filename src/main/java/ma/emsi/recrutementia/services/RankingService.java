@@ -2,7 +2,9 @@ package ma.emsi.recrutementia.services;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import ma.emsi.recrutementia.dto.CandidateMatchHistory;
 import ma.emsi.recrutementia.dto.CandidateRankingResponse;
+import ma.emsi.recrutementia.dto.CandidateStatistics;
 import ma.emsi.recrutementia.dto.MatchResponse;
 import ma.emsi.recrutementia.entities.Candidat;
 import ma.emsi.recrutementia.entities.CvAnalysis;
@@ -13,13 +15,10 @@ import ma.emsi.recrutementia.repositories.CvAnalysisRepository;
 import ma.emsi.recrutementia.repositories.MatchResultRepository;
 import ma.emsi.recrutementia.repositories.OfferRepository;
 import org.springframework.stereotype.Service;
-
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
-import java.util.Set;
-
 import org.springframework.transaction.annotation.Transactional;
+
+import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
 public class RankingService {
@@ -167,6 +166,149 @@ public class RankingService {
         );
     }
     
+    // ========================================
+    // 🆕 NOUVELLES MÉTHODES POUR L'HISTORIQUE
+    // ========================================
+    
+    /**
+     * Récupère l'historique complet des matchings d'un candidat
+     */
+    @Transactional(readOnly = true)
+    public List<CandidateMatchHistory> getCandidateMatchHistory(Long candidatId) {
+        // Vérifier que le candidat existe
+        Candidat candidat = candidatRepository.findById(candidatId)
+            .orElseThrow(() -> new RuntimeException("Candidat non trouvé avec l'ID: " + candidatId));
+        
+        // Récupérer tous les matchings du candidat (triés par date décroissante)
+        List<MatchResult> matchResults = matchResultRepository
+            .findByCandidatIdOrderByCreatedAtDesc(candidatId);
+        
+        // Mapper vers le DTO d'historique
+        return matchResults.stream().map(match -> {
+            try {
+                // Trouver l'offre correspondante
+                Offer offer = offerRepository.findByDescription(match.getOfferText())
+                    .orElse(null);
+                
+                // Parser les JSON
+                List<String> matched = mapper.readValue(
+                    match.getMatchedJson(), 
+                    new TypeReference<List<String>>() {}
+                );
+                
+                List<String> missing = mapper.readValue(
+                    match.getMissingJson(), 
+                    new TypeReference<List<String>>() {}
+                );
+                
+                return CandidateMatchHistory.builder()
+                    .matchId(match.getId())
+                    .offerId(offer != null ? offer.getId() : null)
+                    .offerTitle(offer != null ? offer.getTitre() : "Offre supprimée")
+                    .score(match.getScore())
+                    .matched(matched)
+                    .missing(missing)
+                    .matchedAt(match.getCreatedAt())
+                    .status("En attente") // À adapter selon votre logique métier
+                    .build();
+                    
+            } catch (Exception e) {
+                System.err.println("Erreur parsing JSON pour match #" + match.getId());
+                return null;
+            }
+        })
+        .filter(Objects::nonNull)
+        .collect(Collectors.toList());
+    }
+    
+    /**
+     * Récupère uniquement les meilleurs matchings (dernier par offre)
+     */
+    @Transactional(readOnly = true)
+    public List<CandidateMatchHistory> getCandidateBestMatches(Long candidatId) {
+        List<CandidateMatchHistory> allHistory = getCandidateMatchHistory(candidatId);
+        
+        // Garder uniquement le dernier matching par offre
+        Map<Long, CandidateMatchHistory> bestMatchesByOffer = new HashMap<>();
+        
+        for (CandidateMatchHistory history : allHistory) {
+            Long offerId = history.getOfferId();
+            if (offerId != null) {
+                // Si pas encore d'entrée OU si ce match est plus récent
+                if (!bestMatchesByOffer.containsKey(offerId) ||
+                    history.getMatchedAt().isAfter(
+                        bestMatchesByOffer.get(offerId).getMatchedAt()
+                    )) {
+                    bestMatchesByOffer.put(offerId, history);
+                }
+            }
+        }
+        
+        // Retourner triés par score décroissant
+        return bestMatchesByOffer.values().stream()
+            .sorted(Comparator.comparing(CandidateMatchHistory::getScore).reversed())
+            .collect(Collectors.toList());
+    }
+    
+    /**
+     * Calcule les statistiques d'un candidat
+     */
+    @Transactional(readOnly = true)
+    public CandidateStatistics getCandidateStatistics(Long candidatId) {
+        Candidat candidat = candidatRepository.findById(candidatId)
+            .orElseThrow(() -> new RuntimeException("Candidat non trouvé avec l'ID: " + candidatId));
+        
+        List<CandidateMatchHistory> history = getCandidateBestMatches(candidatId);
+        
+        if (history.isEmpty()) {
+            return CandidateStatistics.builder()
+                .candidatId(candidatId)
+                .candidatName(candidat.getNom() + " " + candidat.getPrenom())
+                .candidatEmail(candidat.getEmail())
+                .totalMatches(0)
+                .excellentMatches(0)
+                .goodMatches(0)
+                .partialMatches(0)
+                .lowMatches(0)
+                .averageScore(0.0)
+                .build();
+        }
+        
+        // Calculs statistiques
+        int excellent = (int) history.stream().filter(h -> h.getScore() >= 75).count();
+        int good = (int) history.stream().filter(h -> h.getScore() >= 50 && h.getScore() < 75).count();
+        int partial = (int) history.stream().filter(h -> h.getScore() >= 25 && h.getScore() < 50).count();
+        int low = (int) history.stream().filter(h -> h.getScore() < 25).count();
+        
+        double avgScore = history.stream()
+            .mapToInt(CandidateMatchHistory::getScore)
+            .average()
+            .orElse(0.0);
+        
+        Optional<CandidateMatchHistory> bestMatch = history.stream()
+            .max(Comparator.comparing(CandidateMatchHistory::getScore));
+        
+        Optional<CandidateMatchHistory> worstMatch = history.stream()
+            .min(Comparator.comparing(CandidateMatchHistory::getScore));
+        
+        return CandidateStatistics.builder()
+            .candidatId(candidatId)
+            .candidatName(candidat.getNom() + " " + candidat.getPrenom())
+            .candidatEmail(candidat.getEmail())
+            .totalMatches(history.size())
+            .excellentMatches(excellent)
+            .goodMatches(good)
+            .partialMatches(partial)
+            .lowMatches(low)
+            .averageScore(Math.round(avgScore * 100.0) / 100.0)
+            .bestScore(bestMatch.map(CandidateMatchHistory::getScore).orElse(null))
+            .worstScore(worstMatch.map(CandidateMatchHistory::getScore).orElse(null))
+            .bestMatchOfferId(bestMatch.map(CandidateMatchHistory::getOfferId).orElse(null))
+            .bestMatchOfferTitle(bestMatch.map(CandidateMatchHistory::getOfferTitle).orElse(null))
+            .build();
+    }
+    
+    // Classe interne existante
     public static class OfferStatistics {
         private int totalCandidates;
         private int highlyRecommended;
