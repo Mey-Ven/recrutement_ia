@@ -1,69 +1,105 @@
 package ma.emsi.recrutementia.web;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import ma.emsi.recrutementia.dto.CandidateRankingResponse;
 import ma.emsi.recrutementia.dto.MatchRequest;
 import ma.emsi.recrutementia.dto.MatchResponse;
 import ma.emsi.recrutementia.entities.Candidat;
-import ma.emsi.recrutementia.entities.MatchResult;
+import ma.emsi.recrutementia.entities.CvAnalysis;
+import ma.emsi.recrutementia.entities.Offer;
 import ma.emsi.recrutementia.repositories.CandidatRepository;
-import ma.emsi.recrutementia.repositories.MatchResultRepository;
-import ma.emsi.recrutementia.services.AiService;
+import ma.emsi.recrutementia.repositories.CvAnalysisRepository;
+import ma.emsi.recrutementia.repositories.OfferRepository;
+import ma.emsi.recrutementia.services.MatchingService;
+import ma.emsi.recrutementia.services.RankingService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.time.LocalDateTime;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/match")
 public class MatchController {
 
-    private final AiService aiService;
-    private final MatchResultRepository matchResultRepository;
+    private final MatchingService matchingService;
+    private final RankingService rankingService;
+    private final CvAnalysisRepository cvAnalysisRepository;
+    private final OfferRepository offerRepository;
     private final CandidatRepository candidatRepository;
-    private final ObjectMapper mapper = new ObjectMapper();
 
-    public MatchController(AiService aiService,
-                           MatchResultRepository matchResultRepository,
-                           CandidatRepository candidatRepository) {
-        this.aiService = aiService;
-        this.matchResultRepository = matchResultRepository;
+    public MatchController(
+            MatchingService matchingService,
+            RankingService rankingService,
+            CvAnalysisRepository cvAnalysisRepository,
+            OfferRepository offerRepository,
+            CandidatRepository candidatRepository
+    ) {
+        this.matchingService = matchingService;
+        this.rankingService = rankingService;
+        this.cvAnalysisRepository = cvAnalysisRepository;
+        this.offerRepository = offerRepository;
         this.candidatRepository = candidatRepository;
     }
 
-    // Réponse API: { "result": {...}, "id": 1 }
-    public record MatchApiResponse(MatchResponse result, Long id) {}
-
     @PostMapping
-    public ResponseEntity<?> match(@RequestBody MatchRequest req) {
+    public ResponseEntity<?> match(@RequestBody MatchRequest request) {
         try {
-            // 1) Appel IA
-            MatchResponse res = aiService.matchCvOffer(req.getCvText(), req.getOfferText());
+            CvAnalysis analysis = cvAnalysisRepository.findById(request.getCvAnalysisId())
+                    .orElseThrow(() -> new RuntimeException("Analyse CV introuvable"));
 
-            // 2) Récupérer candidat si fourni
-            Candidat candidat = null;
-            if (req.getCandidatId() != null) {
-                candidat = candidatRepository.findById(req.getCandidatId())
-                        .orElseThrow(() -> new RuntimeException("Candidat introuvable"));
-            }
+            Offer offer = offerRepository.findById(request.getOfferId())
+                    .orElseThrow(() -> new RuntimeException("Offre introuvable"));
 
-            // 3) Sauvegarde en DB
-            MatchResult entity = MatchResult.builder()
-                    .cvText(req.getCvText())
-                    .offerText(req.getOfferText())
-                    .score(res.getScore())
-                    .matchedJson(mapper.writeValueAsString(res.getMatched()))
-                    .missingJson(mapper.writeValueAsString(res.getMissing()))
-                    .createdAt(LocalDateTime.now())
-                    .candidat(candidat)
-                    .build();
+            Candidat candidat = candidatRepository.findById(request.getCandidatId())
+                    .orElseThrow(() -> new RuntimeException("Candidat introuvable"));
 
-            MatchResult saved = matchResultRepository.save(entity);
+            MatchResponse response = matchingService.matchCvWithOffer(analysis, offer, candidat);
 
-            // 4) Réponse finale
-            return ResponseEntity.ok(new MatchApiResponse(res, saved.getId()));
+            return ResponseEntity.ok(response);
 
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body("Match error: " + e.getMessage());
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
+    // 🎯 NOUVEAU : Classement des candidats pour une offre
+    @GetMapping("/by-offer/{offerId}")
+    public ResponseEntity<?> rankCandidatesByOffer(@PathVariable Long offerId) {
+        try {
+            List<CandidateRankingResponse> rankings = 
+                rankingService.rankCandidatesForOffer(offerId);
+            
+            return ResponseEntity.ok(rankings);
+            
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
+    // 🎯 NOUVEAU : Recalculer et classer tous les candidats
+    @GetMapping("/by-offer/{offerId}/refresh")
+    public ResponseEntity<?> refreshAndRankCandidates(@PathVariable Long offerId) {
+        try {
+            List<CandidateRankingResponse> rankings = 
+                rankingService.rankAllCandidatesForOffer(offerId);
+            
+            return ResponseEntity.ok(rankings);
+            
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
+    // 🎯 NOUVEAU : Statistiques d'une offre
+    @GetMapping("/by-offer/{offerId}/stats")
+    public ResponseEntity<?> getOfferStats(@PathVariable Long offerId) {
+        try {
+            RankingService.OfferStatistics stats = 
+                rankingService.getOfferStatistics(offerId);
+            
+            return ResponseEntity.ok(stats);
+            
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
         }
     }
 }

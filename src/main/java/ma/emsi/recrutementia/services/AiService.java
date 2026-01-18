@@ -59,20 +59,33 @@ Texte OCR:
 
     public SkillsResponse extractSkills(String text) throws Exception {
         String prompt = """
-Tu es un extracteur de compétences à partir d'un texte.
-Retourne UNIQUEMENT un JSON valide EXACTEMENT au format:
-{"skills":["...","..."]}
+    Tu es un extracteur de compétences techniques à partir d'un texte.
+    Retourne UNIQUEMENT un JSON valide EXACTEMENT au format:
+    {"skills":["...","..."]}
 
-Règles:
-- skills = uniquement compétences/technologies/outils/frameworks/concepts
-- normalise (ex: "Spring boot" -> "Spring Boot", "postgres" -> "PostgreSQL")
-- pas d'explications, pas de markdown, pas de texte hors JSON
+    Règles STRICTES:
+    - Extraire uniquement les compétences techniques : langages, frameworks, outils, technologies, méthodologies
+    - Normaliser le nom (ex: "Spring boot" -> "Spring Boot", "postgres" -> "PostgreSQL", "react js" -> "React")
+    - TOUJOURS répondre en FRANÇAIS (ex: "AI training" -> "Formation IA", "Data Analysis" -> "Analyse de données", "Machine Learning" -> "Apprentissage automatique")
+    - Exclure les mots génériques : "développement", "conception", "expérience", "travail", "projet"
+    - Pas d'explications, pas de markdown (```json), pas de texte en dehors du JSON
+    - Si aucune compétence technique trouvée, retourner {"skills":[]}
 
-Texte:
-<<<
-%s
->>>
-""".formatted(text);
+    Exemples:
+    Texte: "Développeur Java Spring Boot avec 3 ans d'expérience"
+    Réponse: {"skills":["Java","Spring Boot"]}
+
+    Texte: "AI model training and deep learning"
+    Réponse: {"skills":["Formation de modèles IA","Apprentissage profond"]}
+
+    Texte: "Power BI dashboards and data visualization"
+    Réponse: {"skills":["Power BI","Visualisation de données"]}
+
+    Texte à analyser:
+    <<<
+    %s
+    >>>
+    """.formatted(text);
 
         Map<String, Object> body = Map.of(
                 "model", model,
@@ -90,6 +103,13 @@ Texte:
                 .body(Map.class);
 
         String json = (String) resp.getOrDefault("response", "{\"skills\":[]}");
+        
+        // Nettoyage de la réponse (au cas où Mistral ajoute des backticks)
+        json = json.trim()
+                   .replaceFirst("^```json\\s*", "")
+                   .replaceFirst("\\s*```$", "")
+                   .trim();
+        
         return mapper.readValue(json, SkillsResponse.class);
     }
 
